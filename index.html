@@ -1,0 +1,307 @@
+<!doctype html>
+<html lang="de">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width,initial-scale=1.0,viewport-fit=cover" />
+<title>Aufsichts-Checker</title>
+<style>
+  :root{
+    --bg:#fbfbfd;
+    --card:#ffffff;
+    --accent:#0a84ff;
+    --good:#34c759;
+    --text:#111;
+    --muted:#666;
+  }
+  html,body{height:100%;margin:0;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,"Helvetica Neue",Arial;}
+  body{background:linear-gradient(180deg,#f2f6ff 0%,var(--bg) 60%);display:flex;align-items:center;justify-content:center;padding:12px;}
+  .app{width:100%;max-width:820px;background:var(--card);border-radius:20px;padding:20px;box-shadow:0 8px 30px rgba(10,20,50,0.08);}
+  header{display:flex;align-items:center;justify-content:space-between;margin-bottom:10px;}
+  h1{font-size:20px;margin:0;color:var(--text);}
+  .sub{color:var(--muted);font-size:13px;}
+  .main{display:flex;gap:18px;flex-wrap:wrap;align-items:center;}
+  .left{flex:1;min-width:260px;}
+  .right{width:300px;min-width:260px;}
+  .bigcount{font-size:34px;font-weight:600;color:var(--text);margin:6px 0;}
+  .quote{font-size:16px;color:var(--muted);margin-bottom:8px;}
+  .progresswrap{background:#eef3ff;border-radius:12px;padding:10px;}
+  .progressbar{position:relative;height:28px;background:#e6eefb;border-radius:8px;overflow:hidden;}
+  .progressfill{height:100%;width:0%;background:linear-gradient(90deg,var(--accent),#6fb1ff);transition:width 600ms ease;}
+  .goal{display:flex;justify-content:space-between;font-size:12px;color:var(--muted);margin-top:6px;}
+  .btn{
+    display:inline-block;background:var(--good);color:white;border:none;padding:18px 22px;border-radius:14px;font-size:20px;font-weight:700;box-shadow:0 6px 18px rgba(52,199,89,0.18);
+    width:100%;text-align:center;touch-action:manipulation;
+  }
+  .btn:active{transform:translateY(2px)}
+  .small{font-size:13px;color:var(--muted);margin-top:10px}
+  .msg{padding:12px;border-radius:12px;margin-top:12px;font-weight:600;text-align:center}
+  .thanks{background:#ecffef;color:#065f22}
+  .danger{background:#fff3f2;color:#7a1919}
+  footer{margin-top:14px;display:flex;gap:8px;flex-wrap:wrap;align-items:center;}
+  .ghost{background:transparent;border:1px solid #ddd;padding:10px 12px;border-radius:10px;color:var(--muted);font-weight:600}
+  .meta{font-size:12px;color:var(--muted);margin-left:auto;}
+  .history{max-height:200px;overflow:auto;padding:8px;border-radius:10px;border:1px solid #f0f0f0;margin-top:8px;}
+  .history div{padding:6px;border-bottom:1px dashed #f0f0f0;font-size:13px;}
+  @media (max-width:700px){
+    .main{flex-direction:column}
+    .right{width:100%}
+  }
+</style>
+</head>
+<body>
+  <div class="app" role="application" aria-label="Aufsichtsquote">
+    <header>
+      <div>
+        <h1>Aufsichts-Checker</h1>
+        <div class="sub">Diese Woche &middot; Ziel: 98 %</div>
+      </div>
+      <div class="meta" id="meta-weeks">Erreichte Wochen: 0</div>
+    </header>
+
+    <section class="main">
+      <div class="left">
+        <div class="bigcount" id="count">Aufsichten diese Woche: 0 / 100</div>
+        <div class="quote" id="quote">Quote: 0.0%</div>
+
+        <div class="progresswrap" aria-hidden="true">
+          <div class="progressbar" role="progressbar" aria-valuemin="0" aria-valuemax="100">
+            <div class="progressfill" id="progress"></div>
+          </div>
+          <div class="goal">
+            <div>Fortschritt</div>
+            <div id="goal-text">98%</div>
+          </div>
+        </div>
+
+        <div style="margin-top:12px">
+          <button class="btn" id="main-btn" aria-label="Aufsicht beenden">AUFSICHT BEENDET</button>
+          <div class="small">Zeitfenster: 09:15–09:40 & 11:05–11:30</div>
+        </div>
+
+        <div id="feedback" class="msg" style="display:none"></div>
+      </div>
+
+      <div class="right">
+        <div style="font-weight:700;margin-bottom:8px">Wochendetails</div>
+        <div class="history" id="week-history" aria-live="polite">
+          <!-- Verlauf pro Woche -->
+        </div>
+
+        <div style="margin-top:10px;display:flex;gap:8px">
+          <button class="ghost" id="export-btn">Verlauf als CSV exportieren</button>
+          <button class="ghost" id="reset-btn">Woche manuell zurücksetzen</button>
+        </div>
+      </div>
+    </section>
+
+    <footer>
+      <div class="sub">Hinweis: App speichert lokal auf diesem Gerät.</div>
+    </footer>
+  </div>
+
+<script>
+/* ================== Konfiguration ================== */
+const AUFSICHTEN_PRO_WOCHE = 100;
+const AUFSICHTEN_PRO_TAG = 20;
+const ZIELQUOTE = 98;
+const ZEITFENSTER = [
+  {start: {h:9,m:15}, end: {h:9,m:40}},
+  {start: {h:11,m:5}, end: {h:11,m:30}}
+];
+const STORAGE_KEY = "aufsicht_app_data_v1";
+/* ================================================== */
+
+/* Hilfs: ISO Week von Date */
+function getIsoWeekKey(date = new Date()){
+  // returns "YYYY-WW"
+  const tmp = new Date(Date.UTC(date.getFullYear(), date.getMonth(), date.getDate()));
+  // set to nearest Thursday: current date + 4 - current day number
+  tmp.setUTCDate(tmp.getUTCDate() + 4 - (tmp.getUTCDay()||7));
+  const yearStart = new Date(Date.UTC(tmp.getUTCFullYear(),0,1));
+  const weekNo = Math.ceil( ( ( (tmp - yearStart) / 86400000) + 1)/7 );
+  return `${tmp.getUTCFullYear()}-${String(weekNo).padStart(2,'0')}`;
+}
+
+/* Zeitfenster prüfen */
+function nowInWindow(){
+  const d = new Date();
+  for(const w of ZEITFENSTER){
+    const s = new Date(d); s.setHours(w.start.h, w.start.m, 0, 0);
+    const e = new Date(d); e.setHours(w.end.h, w.end.m, 59, 999);
+    if(d >= s && d <= e) return true;
+  }
+  return false;
+}
+
+/* Datenstruktur lokal */
+function loadData(){
+  const raw = localStorage.getItem(STORAGE_KEY);
+  if(!raw){
+    const init = {weeks: {}, history: []}; // weeks: { "YYYY-WW": {count:0} }, history: [{week,count,quote,targetReached}]
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(init));
+    return init;
+  }
+  try { return JSON.parse(raw); } catch(e){ console.error(e); localStorage.removeItem(STORAGE_KEY); return loadData(); }
+}
+function saveData(data){ localStorage.setItem(STORAGE_KEY, JSON.stringify(data)); }
+
+/* UI-Refs */
+const countEl = document.getElementById('count');
+const quoteEl = document.getElementById('quote');
+const progressEl = document.getElementById('progress');
+const mainBtn = document.getElementById('main-btn');
+const feedbackEl = document.getElementById('feedback');
+const historyEl = document.getElementById('week-history');
+const metaWeeksEl = document.getElementById('meta-weeks');
+const exportBtn = document.getElementById('export-btn');
+const resetBtn = document.getElementById('reset-btn');
+
+/* Audio Feedback (WebAudio) */
+let audioCtx = null;
+function beep(freq=750,duration=150){
+  try {
+    if(!audioCtx) audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+    const o = audioCtx.createOscillator();
+    const g = audioCtx.createGain();
+    o.type = 'sine';
+    o.frequency.value = freq;
+    o.connect(g);
+    g.connect(audioCtx.destination);
+    g.gain.value = 0.0001;
+    o.start();
+    g.gain.exponentialRampToValueAtTime(0.1, audioCtx.currentTime + 0.01);
+    setTimeout(()=>{ g.gain.exponentialRampToValueAtTime(0.00001, audioCtx.currentTime + 0.02); o.stop(); }, duration);
+  } catch(e){ console.warn("Audio nicht verfügbar", e); }
+}
+
+/* App-Logik */
+let DATA = loadData();
+let currentWeekKey = getIsoWeekKey();
+if(!DATA.weeks[currentWeekKey]) DATA.weeks[currentWeekKey] = {count:0, entries:[]};
+
+function updateUI(){
+  // Wenn neue Woche aufgetreten ist (z.B. App lief über Mitternacht ohne Reload)
+  const wk = getIsoWeekKey();
+  if(wk !== currentWeekKey){
+    // sichern der alten Woche in history
+    const old = DATA.weeks[currentWeekKey] || {count:0};
+    const quote = (old.count / AUFSICHTEN_PRO_WOCHE) * 100;
+    DATA.history.push({week: currentWeekKey, count: old.count, quote: Number(quote.toFixed(1)), targetReached: (quote >= ZIELQUOTE)});
+    // new week
+    currentWeekKey = wk;
+    if(!DATA.weeks[currentWeekKey]) DATA.weeks[currentWeekKey] = {count:0, entries:[]};
+    saveData(DATA);
+  }
+
+  const wkdata = DATA.weeks[currentWeekKey];
+  const count = wkdata.count || 0;
+  const quote = (count / AUFSICHTEN_PRO_WOCHE) * 100;
+  countEl.textContent = `Aufsichten diese Woche: ${count} / ${AUFSICHTEN_PRO_WOCHE}`;
+  quoteEl.textContent = `Quote: ${quote.toFixed(1)}%`;
+  const pct = Math.min(100, quote);
+  progressEl.style.width = `${pct}%`;
+  document.getElementById('goal-text').textContent = `${ZIELQUOTE}%`;
+
+  // history list (letzte Wochen + aktueller Stand)
+  historyEl.innerHTML = '';
+  // add previous weeks (most recent first)
+  const rev = DATA.history.slice().reverse();
+  rev.slice(0,8).forEach(h => {
+    const div = document.createElement('div');
+    div.textContent = `${h.week}: ${h.count}/${AUFSICHTEN_PRO_WOCHE} (${h.quote}%) ${h.targetReached ? "✅" : "❌"}`;
+    historyEl.appendChild(div);
+  });
+  // current week as top
+  const cur = document.createElement('div');
+  cur.style.fontWeight = '700';
+  cur.textContent = `${currentWeekKey} (aktuell): ${count}/${AUFSICHTEN_PRO_WOCHE} (${quote.toFixed(1)}%)`;
+  historyEl.insertBefore(cur, historyEl.firstChild);
+
+  // Anzahl erreichte Wochen
+  const wins = DATA.history.filter(h => h.targetReached).length;
+  metaWeeksEl.textContent = `Erreichte Wochen: ${wins}`;
+
+  saveData(DATA);
+}
+
+/* Button-Click Handler */
+function registerAufsicht(isNachmeldung=false){
+  const wk = currentWeekKey;
+  DATA.weeks[wk].count = (DATA.weeks[wk].count || 0) + 1;
+  DATA.weeks[wk].entries.push({ts: new Date().toISOString(), nachmeldung: !!isNachmeldung});
+  // feedback
+  feedbackShow("Vielen Dank für deine Pausenaufsicht", "thanks");
+  beep();
+  updateUI();
+}
+
+/* Feedback-visual */
+let feedbackTimer = null;
+function feedbackShow(text, type="thanks"){
+  if(feedbackTimer) clearTimeout(feedbackTimer);
+  feedbackEl.style.display = 'block';
+  feedbackEl.textContent = text;
+  feedbackEl.className = 'msg ' + (type === 'thanks' ? 'thanks' : 'danger');
+  feedbackTimer = setTimeout(()=>{ feedbackEl.style.display = 'none'; }, 1800);
+}
+
+/* Main button */
+mainBtn.addEventListener('click', ()=>{
+  if(nowInWindow()){
+    registerAufsicht(false);
+  } else {
+    // Softlock: nachmeldung?
+    const ok = confirm("Möchten Sie eine Pausenaufsicht nachmelden?");
+    if(ok) {
+      registerAufsicht(true);
+    } else {
+      // no action
+      feedbackShow("Nachmeldung abgebrochen", "danger");
+      // optional: kurz ausblenden
+    }
+  }
+});
+
+/* Export Verlauf als CSV */
+exportBtn.addEventListener('click', ()=>{
+  // Build CSV: history + current week
+  const rows = [["woche","aufsichten","quote","ziel_erreicht"]];
+  DATA.history.forEach(h => rows.push([h.week, h.count, h.quote, h.targetReached ? "Ja" : "Nein"]));
+  // include current week as last row
+  const cur = DATA.weeks[currentWeekKey] || {count:0};
+  const quotecur = ((cur.count||0)/AUFSICHTEN_PRO_WOCHE)*100;
+  rows.push([currentWeekKey, cur.count||0, quotecur.toFixed(1), (quotecur>=ZIELQUOTE) ? "Ja" : "Nein"]);
+
+  const csv = rows.map(r => r.map(c => `"${String(c).replace(/"/g,'""')}"`).join(",")).join("\n");
+  const blob = new Blob([csv], {type: "text/csv;charset=utf-8;"});
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = `aufsicht_verlauf_${currentWeekKey}.csv`;
+  document.body.appendChild(a); a.click(); a.remove();
+  URL.revokeObjectURL(url);
+});
+
+/* Manuell reset (falls gewünscht) */
+resetBtn.addEventListener('click', ()=>{
+  const ok = confirm("Wirklich diese Woche manuell zurücksetzen? (Alte Daten werden in Verlauf übernommen)");
+  if(!ok) return;
+  // move current week to history
+  const old = DATA.weeks[currentWeekKey] || {count:0};
+  const quote = (old.count / AUFSICHTEN_PRO_WOCHE) * 100;
+  DATA.history.push({week: currentWeekKey, count: old.count, quote: Number(quote.toFixed(1)), targetReached: (quote >= ZIELQUOTE)});
+  // reset
+  DATA.weeks[currentWeekKey] = {count:0, entries:[]};
+  saveData(DATA);
+  updateUI();
+});
+
+/* Periodische Checks (z.B. Wochenwechsel) */
+setInterval(updateUI, 30 * 1000); // alle 30s
+updateUI();
+
+/* Accessibility: hint on first touch to allow audio in Safari */
+document.addEventListener('touchstart', function once(){ try{ if(!audioCtx) { audioCtx = new (window.AudioContext || window.webkitAudioContext)(); audioCtx.resume(); } } catch(e){} document.removeEventListener('touchstart', once); }, {passive:true});
+</script>
+</body>
+</html>
